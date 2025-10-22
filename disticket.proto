@@ -1,0 +1,40 @@
+syntax = "proto3";
+package disticket;
+
+service AppAPI {
+  rpc Login(LoginRequest) returns (LoginResponse);
+  rpc Logout(LogoutRequest) returns (Status);
+  rpc GetAvailability(GetRequest) returns (GetResponse);
+  rpc PostBooking(BookingRequest) returns (Status);
+}
+
+service Raft {
+  rpc RequestVote(RequestVoteReq) returns (RequestVoteResp);
+  rpc AppendEntries(AppendEntriesReq) returns (AppendEntriesResp);
+}
+
+service LLMService {
+  rpc GetLLMAnswer(LLMRequest) returns (LLMResponse);
+}
+
+message LoginRequest { string username = 1; string password = 2; }
+message LoginResponse { bool ok = 1; string token = 2; string status = 3; }
+
+message LogoutRequest { string token = 1; }
+message Status { bool ok = 1; string message = 2; }
+
+message GetRequest { string token = 1; string queryType = 2; } // queryType: "seats"
+message Seat { int32 seat_no = 1; bool booked = 2; string by = 3; }
+message GetResponse { bool ok = 1; repeated Seat seats = 2; string message = 3; }
+
+message BookingRequest { string token = 1; int32 seat_no = 2; string user = 3; string request_id = 4; }
+
+message RequestVoteReq { int32 term = 1; string candidateId = 2; int32 lastLogIndex = 3; int32 lastLogTerm = 4; }
+message RequestVoteResp { int32 term = 1; bool voteGranted = 2; }
+
+message LogEntry { int32 term = 1; string command = 2; string requestId = 3; } // command: JSON-like "BOOK:seat:user"
+message AppendEntriesReq { int32 term = 1; string leaderId = 2; int32 prevLogIndex = 3; int32 prevLogTerm = 4; repeated LogEntry entries = 5; int32 leaderCommit = 6; }
+message AppendEntriesResp { int32 term = 1; bool success = 2; int32 matchIndex = 3; }
+
+message LLMRequest { string requestId = 1; string query = 2; }
+message LLMResponse { string requestId = 1; string answer = 2; }
