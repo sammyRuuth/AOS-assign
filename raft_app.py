@@ -1,14 +1,12 @@
-# raft_app.py — Final version with replicated login + commit-sync fix
+# raft_app.py — replicated login + booking using Raft
 import threading, time, random, sys, uuid
 from concurrent import futures
 import grpc
 import disticket_pb2, disticket_pb2_grpc
 
-
 # ---------------- Helper ----------------
 def parse_peers(peers_str):
     return [p.strip() for p in peers_str.split(",") if p.strip()]
-
 
 # ---------------- Raft Node ----------------
 class RaftNode(disticket_pb2_grpc.RaftServicer):
@@ -240,7 +238,6 @@ class RaftNode(disticket_pb2_grpc.RaftServicer):
                 time.sleep(0.05)
             return False, "REPLICATION_TIMEOUT", None
 
-
 # ---------------- App State ----------------
 class AppState:
     def __init__(self, total_seats=10):
@@ -249,6 +246,7 @@ class AppState:
         self.tokens = {}
         self.lock = threading.Lock()
 
+    # -------- Replicated application methods --------
     def apply_login(self, user, token):
         self.tokens[token] = user
 
@@ -270,7 +268,6 @@ class AppState:
         with self.lock:
             return [{"seat_no": n, "booked": v["booked"], "by": v["by"]} for n, v in self.seats.items()]
 
-
 # ---------------- AppAPI Service ----------------
 class AppAPIService(disticket_pb2_grpc.AppAPIServicer):
     def __init__(self, raftnode, app_state):
@@ -285,16 +282,17 @@ class AppAPIService(disticket_pb2_grpc.AppAPIServicer):
         success, msg, leader = self.raftnode.propose(f"LOGIN:{user}:{token}", request_id)
 
         if success:
-            # Wait briefly until committed and applied
-            time.sleep(0.3)
-            if token in self.app_state.tokens:
-                return disticket_pb2.LoginResponse(ok=True, token=token, status="OK")
-            else:
-                return disticket_pb2.LoginResponse(ok=False, token="", status="Commit wait timeout")
+            # Wait until token is visible in replicated state (max 3s)
+            for _ in range(30):
+                if token in self.app_state.tokens:
+                    return disticket_pb2.LoginResponse(ok=True, token=token, status="OK")
+                time.sleep(0.1)
+            return disticket_pb2.LoginResponse(ok=False, token="", status="TIMEOUT: token not yet applied")
 
         if msg == "NOT_LEADER" and leader:
             return disticket_pb2.LoginResponse(ok=False, token="", status=f"NOT_LEADER:{leader}")
         return disticket_pb2.LoginResponse(ok=False, token="", status=msg)
+
 
     def Logout(self, request, context):
         token = request.token
@@ -326,7 +324,6 @@ class AppAPIService(disticket_pb2_grpc.AppAPIServicer):
             return disticket_pb2.Status(ok=False, message=f"NOT_LEADER:{leader}")
         return disticket_pb2.Status(ok=False, message=msg)
 
-
 # ---------------- Server Runner ----------------
 def serve(node_id, host_port, peers, total_seats=10):
     app_state = AppState(total_seats)
@@ -342,7 +339,6 @@ def serve(node_id, host_port, peers, total_seats=10):
             time.sleep(1)
     except KeyboardInterrupt:
         server.stop(0)
-
 
 # ---------------- CLI ----------------
 if __name__ == "__main__":
